@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
+<title>Pandora Document Viewer</title>
+<style>
+  :root{
+    --bg: #f0f0f3;
+    --page-bg: #fff;
+    --toolbar-bg: rgba(255,255,255,0.95);
+    --accent: #3b1ace;
+    --doc-width: 90vw; /* document area width target */
+    --doc-scale: 1; /* zoom multiplier */
+    --topbar-height: 56px;
+  }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    font-family: "Times New Roman", serif;
+    color: #222;
+    -webkit-font-smoothing:antialiased;
+    -moz-osx-font-smoothing:grayscale;
+    touch-action: manipulation;
+  }
+
+  /* Floating plus button (top-right) */
+  #plusButton {
+    position: fixed;
+    bottom: 14px;
+    right: 14px;
+    z-index: 120;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--toolbar-bg);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #d0d0d0;
+    cursor: pointer;
+  }
+  #plusButton:active { transform: scale(0.98); }
+  #plusButton .plus {
+    font-size: 26px;
+    color: var(--accent);
+    line-height: 0;
+    user-select: none;
+  }
+
+  /* Dropdown menu for plus button */
+  #plusMenu {
+    position: fixed;
+    bottom: 70px;
+    right: 14px;
+    background: var(--toolbar-bg);
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.12);
+    padding: 8px;
+    display: none;
+    flex-direction: column;
+    z-index: 119;
+    min-width: 160px;
+    font-family: sans-serif;
+  }
+  #plusMenu button {
+    background: transparent;
+    border: none;
+    padding: 10px 12px;
+    text-align: left;
+    cursor: pointer;
+    font-size: 14px;
+    color:#111;
+  }
+  #plusMenu button:hover { background: #f5f5f7; border-radius: 6px; }
+
+  /* Top gray bar that appears when scrolling up */
+  #topBar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--topbar-height);
+    background: #efefef;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 12px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+    transform: translateY(-110%);
+    transition: transform 260ms ease;
+    z-index: 110;
+    font-family: sans-serif;
+  }
+  #topBar.visible { transform: translateY(0); }
+
+  #fileName {
+    font-weight: 600;
+    color: #222;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 50vw;
+  }
+
+  /* Zoom controls */
+  .zoom-controls {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .zoom-controls button {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    border: 1px solid #d0d0d0;
+    background: white;
+    font-size: 18px;
+    cursor: pointer;
+  }
+  .zoom-display {
+    min-width: 56px;
+    text-align: center;
+    font-weight: 600;
+  }
+
+  /* Document viewport */
+  #viewport {
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: calc(var(--topbar-height) + 12px) 0 40px; /* leave top space for the top bar */
+    box-sizing: border-box;
+  }
+
+  /* Wrapper which actually scales */
+  #docWrapper {
+    width: var(--doc-width);
+    max-width: 1200px;
+    transform-origin: top center;
+    transform: scale(var(--doc-scale));
+    transition: transform 160ms ease;
+  }
+
+  .page {
+    width: 100%;
+    min-height: 297mm;
+    margin: 1.6rem auto;
+    background: var(--page-bg);
+    box-shadow: 0 0 15px rgba(0,0,0,0.12);
+    padding: 25mm;
+    box-sizing: border-box;
+    border-radius: 6px;
+    overflow: visible;
+  }
+
+  /* Two-column support */
+  .columns {
+    column-count: 2;
+    column-gap: 20mm;
+  }
+
+  .block {
+    break-inside: avoid;
+    margin-bottom: 1.2rem;
+  }
+
+  video, img {
+    display: block;
+    margin: 1em auto;
+    max-width: 100%;
+    height: auto;
+  }
+
+  svg {
+    display: block;
+    max-width: 100%;
+    margin: 0 auto;
+  }
+
+  pre {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0.5rem 0;
+    font-family: "Courier New", monospace;
+    font-size: 1em;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+
+  .error {
+    color: #a33;
+    font-family: monospace;
+    font-size: 0.9em;
+    background: #fff3f3;
+    border: 1px solid #ffcccc;
+    padding: 0.3rem;
+    border-radius: 4px;
+  }
+
+  #loader {
+    text-align: center;
+    color: #777;
+    margin-top: 4rem;
+  }
+
+  /* Responsive tweaks */
+  @media (max-width: 700px) {
+    #plusButton { width:44px; height:44px; top:10px; right:10px; }
+    #plusMenu { right:10px; top:62px; min-width:140px; }
+    #docWrapper { width: 95vw; padding: 0; }
+    .page { padding: 18mm; margin: 1rem auto; border-radius: 4px; }
+    #fileName { max-width: 40vw; font-size: 14px; }
+    .zoom-controls button { width:34px; height:34px; }
+  }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body>
+
+<!-- Top gray bar (hidden until user scrolls up) -->
+<div id="topBar" aria-hidden="true">
+  <div id="fileName">No file loaded</div>
+  <div class="zoom-controls" role="group" aria-label="Zoom controls">
+    <button id="zoomOut" title="Zoom out">−</button>
+    <div class="zoom-display" id="zoomDisplay">100%</div>
+    <button id="zoomIn" title="Zoom in">+</button>
+  </div>
+</div>
+
+<!-- Plus button for load/save -->
+<div id="plusButton" title="Open menu" aria-haspopup="true" aria-expanded="false">
+  <div class="plus">+</div>
+</div>
+
+<!-- Dropdown for plus button -->
+<div id="plusMenu" role="menu" aria-hidden="true">
+  <button id="loadBtn" role="menuitem">Load .pandora</button>
+  <button id="saveBtn" role="menuitem">Save current file</button>
+  <hr style="margin:6px 0;border:none;border-top:1px solid #eee;">
+  <button id="closeBtn" role="menuitem">Close current</button>
+</div>
+
+<!-- hidden file input used for loading -->
+<input type="file" id="fileInput" accept=".pandora" style="display:none" />
+
+<!-- document viewport -->
+<div id="viewport">
+  <div id="docWrapper">
+    <div id="document"></div>
+  </div>
+</div>
+
+<script>
+(async function(){
+  const docContainer = document.getElementById('document');
+  const fileInput = document.getElementById('fileInput');
+  const plusButton = document.getElementById('plusButton');
+  const plusMenu = document.getElementById('plusMenu');
+  const loadBtn = document.getElementById('loadBtn');
+  const saveBtn = document.getElementById('saveBtn');
+  const closeBtn = document.getElementById('closeBtn');
+  const topBar = document.getElementById('topBar');
+  const fileNameEl = document.getElementById('fileName');
+  const zoomIn = document.getElementById('zoomIn');
+  const zoomOut = document.getElementById('zoomOut');
+  const zoomDisplay = document.getElementById('zoomDisplay');
+  const docWrapper = document.getElementById('docWrapper');
+
+  let currentFile = null;       // File or Blob of the currently loaded .pandora
+  let currentFileName = '';
+  let zipEntries = {};          // map path -> objectURL
+  let lastURLs = [];            // list of created object URLs to revoke
+  let metaCache = null;
+  let scrollPos = window.scrollY || document.documentElement.scrollTop;
+  let topBarVisible = false;
+  let zoom = 1; // default zoom multiplier (1 = 100%)
+  const MIN_ZOOM = 0.6, MAX_ZOOM = 2.2, ZOOM_STEP = 0.1;
+
+  // Helpers
+  function setZoom(v){
+    zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v));
+    document.documentElement.style.setProperty('--doc-scale', zoom.toString());
+    zoomDisplay.textContent = Math.round(zoom*100) + '%';
+  }
+  setZoom(1);
+
+  function togglePlusMenu(show){
+    plusMenu.style.display = show ? 'flex' : 'none';
+    plusButton.setAttribute('aria-expanded', show ? 'true' : 'false');
+    plusMenu.setAttribute('aria-hidden', show ? 'false' : 'true');
+  }
+
+  function cleanUpCurrent() {
+    // revoke created URLs and clear UI
+    for(const u of lastURLs){ try{ URL.revokeObjectURL(u); }catch(e){} }
+    lastURLs = [];
+    zipEntries = {};
+    metaCache = null;
+    currentFile = null;
+    currentFileName = '';
+    fileNameEl.textContent = 'No file loaded';
+    docContainer.innerHTML = '';
+  }
+
+  // handle plus button interactions
+  plusButton.addEventListener('click', e=>{
+    togglePlusMenu(plusMenu.style.display !== 'flex');
+  });
+
+  // close menu when clicking outside
+  document.addEventListener('click', e=>{
+    if(!plusButton.contains(e.target) && !plusMenu.contains(e.target)){
+      togglePlusMenu(false);
+    }
+  });
+
+  // open file input when clicking Load
+  loadBtn.addEventListener('click', ()=> {
+    togglePlusMenu(false);
+    fileInput.click();
+  });
+
+  // Save current file (download)
+  saveBtn.addEventListener('click', ()=> {
+    if(!currentFile) {
+      alert('No file loaded to save.');
+      return;
+    }
+    // if it's a File object, use it directly; otherwise make a blob
+    const blob = currentFile instanceof Blob ? currentFile : new Blob([currentFile], {type:'application/zip'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = currentFileName || 'document.pandora';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    togglePlusMenu(false);
+  });
+
+  closeBtn.addEventListener('click', ()=> {
+    cleanUpCurrent();
+    togglePlusMenu(false);
+  });
+
+  // file input change -> load file
+  fileInput.addEventListener('change', async (e)=>{
+    if(e.target.files.length) {
+      await loadPandora(e.target.files[0]);
+      // reset input so same file can be selected again later
+      fileInput.value = "";
+    }
+  });
+
+  // also support dropping
+  document.body.addEventListener('dragover', e=>{ e.preventDefault(); }, {passive:false});
+  document.body.addEventListener('drop', async (e)=> {
+    e.preventDefault();
+    const f = e.dataTransfer.files[0];
+    if(f && f.name.endsWith('.pandora')) await loadPandora(f);
+  });
+
+  // zoom controls
+  zoomIn.addEventListener('click', ()=> setZoom(zoom + ZOOM_STEP));
+  zoomOut.addEventListener('click', ()=> setZoom(zoom - ZOOM_STEP));
+
+  // keyboard shortcuts: + and - for zoom (also allow meta/ctrl)
+  document.addEventListener('keydown', (ev)=>{
+    if(ev.key === '+' || (ev.key === '=' && (ev.ctrlKey || ev.metaKey))) { ev.preventDefault(); setZoom(zoom + ZOOM_STEP); }
+    if(ev.key === '-') { ev.preventDefault(); setZoom(zoom - ZOOM_STEP); }
+  });
+
+  // show top bar when scrolling up, hide when scrolling down
+  let lastY = window.scrollY || document.documentElement.scrollTop;
+  let tickScheduled = false;
+  window.addEventListener('scroll', ()=>{
+    if(tickScheduled) return;
+    tickScheduled = true;
+    requestAnimationFrame(()=>{
+      const y = window.scrollY || document.documentElement.scrollTop;
+      if(y < 60) {
+        // near top -> always show topBar
+        topBar.classList.add('visible');
+        topBarVisible = true;
+      } else if(y < lastY) {
+        // scrolling up --> show
+        topBar.classList.add('visible');
+        topBarVisible = true;
+      } else {
+        // scrolling down -> hide
+        topBar.classList.remove('visible');
+        topBarVisible = false;
+      }
+      lastY = y;
+      tickScheduled = false;
+    });
+  }, {passive:true});
+
+  // core loader
+  async function loadPandora(file){
+    // clean up previous
+    cleanUpCurrent();
+
+    docContainer.innerHTML = '<div id="loader">Loading...</div>';
+    try{
+      const buf = await file.arrayBuffer();
+      const zip = await JSZip.loadAsync(buf);
+      const metaFile = zip.file('meta.json');
+      if(!metaFile){
+        docContainer.innerHTML = '<div class="error">meta.json not found</div>';
+        return;
+      }
+      const meta = JSON.parse(await metaFile.async('string'));
+      metaCache = meta;
+      const seq = meta.sequence || [];
+
+      // create entries map with object URLs
+      // we want to allow loading new file while revoking previous urls, so store and revoke later in cleanUpCurrent()
+      const entries = {};
+      const createdURLs = [];
+      await Promise.all(Object.keys(zip.files).map(async k=>{
+        if(k === 'meta.json') return;
+        const f = zip.files[k];
+        if(f.dir) return;
+        const blob = await f.async('blob');
+        const url = URL.createObjectURL(blob);
+        entries[k] = url;
+        createdURLs.push(url);
+      }));
+
+      // store global state
+      currentFile = file; // keep the File object for "save"
+      currentFileName = file.name || 'document.pandora';
+      fileNameEl.textContent = currentFileName;
+      zipEntries = entries;
+      lastURLs = createdURLs;
+
+      // render sequence
+      docContainer.innerHTML = '';
+      let page = createPage(meta.layout);
+      docContainer.appendChild(page);
+
+      for(const item of seq){
+        // pagebreak handling
+        if(item.pagebreak || (item.text && /\\(newpage|pagebreak)/.test(item.text))){
+          page = createPage(meta.layout);
+          docContainer.appendChild(page);
+          continue;
+        }
+
+        const block = document.createElement('div');
+        block.className = 'block';
+
+        try {
+          if (item.type === 'latex') {
+            // prefer SVG files embedded raw
+            if (item.file && /\.svg$/i.test(item.file) && zip.file(item.file)) {
+              const svgText = await zip.file(item.file).async('string');
+              // sanitize trivial xml prolog to avoid duplicate xmlns issues (safe handling)
+              block.innerHTML = svgText;
+            } else if (item.rendered && zipEntries[item.rendered]) {
+              const img = document.createElement('img');
+              img.src = zipEntries[item.rendered];
+              block.appendChild(img);
+            } else {
+              // fallback: try to fetch the .tex raw source from zip then MathJax it
+              const pre = document.createElement('pre');
+              let latexSource = '(empty LaTeX block)';
+              if(item.file && zip.file(item.file)) {
+                try { latexSource = await zip.file(item.file).async('string'); }
+                catch(e) { latexSource = item.text || latexSource; }
+              } else if(item.text) latexSource = item.text;
+              pre.textContent = latexSource;
+              block.appendChild(pre);
+              // MathJax typeset
+              if(window.MathJax && MathJax.typesetPromise) await MathJax.typesetPromise([pre]);
+            }
+          } else if(item.type === 'video'){
+            const vid = document.createElement('video');
+            if(zipEntries[item.file]) vid.src = zipEntries[item.file];
+            vid.loop = true; vid.autoplay = true; vid.muted = true; vid.playsInline = true; vid.controls = false;
+            if(item.width) vid.style.width = item.width;
+            if(item.height) vid.style.height = item.height;
+            if(item.scale) vid.style.width = (parseFloat(item.scale)*100)+'%';
+            block.appendChild(vid);
+          } else if(item.type === 'image'){
+            const img = document.createElement('img');
+            if(zipEntries[item.file]) img.src = zipEntries[item.file];
+            if(item.width) img.style.width = item.width;
+            if(item.height) img.style.height = item.height;
+            if(item.scale) img.style.width = (parseFloat(item.scale)*100)+'%';
+            block.appendChild(img);
+          } else if(item.type === 'error'){
+            const ebox = document.createElement('div');
+            ebox.className='error';
+            ebox.textContent = item.text || 'Unknown error block';
+            block.appendChild(ebox);
+          }
+        } catch(err){
+          const ebox = document.createElement('div');
+          ebox.className='error';
+          ebox.textContent = '[Error rendering block: ' + (err && err.message ? err.message : String(err)) + ']';
+          block.appendChild(ebox);
+        }
+
+        page.querySelector('.page-body').appendChild(block);
+      }
+
+      // store references in case user wants to save
+      currentFile = file;
+      currentFileName = file.name || 'document.pandora';
+      fileNameEl.textContent = currentFileName;
+
+    } catch(err){
+      console.error(err);
+      docContainer.innerHTML = '<div class="error">Failed to load .pandora — see console for details</div>';
+    }
+  } // end loadPandora
+
+  // page creation helper
+  function createPage(layout){
+    const page = document.createElement('div');
+    page.className = 'page';
+    const body = document.createElement('div');
+    body.className = 'page-body';
+    if(layout === 'two-column' || /two.?column/i.test(layout)) body.classList.add('columns');
+    page.appendChild(body);
+    return page;
+  }
+
+  // initialize UI states
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'hidden') togglePlusMenu(false); });
+
+  // expose a small API on window for debugging
+  window.pandoraViewer = {
+    loadFile: async (file) => await loadPandora(file),
+    close: cleanUpCurrent,
+    getCurrentFileName: ()=> currentFileName,
+    setZoom: (v)=> setZoom(v)
+  };
+
+  // close current file when user navigates away to ensure URLs revoked
+  window.addEventListener('beforeunload', ()=> { cleanUpCurrent(); });
+
+})();
+</script>
+</body>
+</html>
