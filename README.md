@@ -4,7 +4,7 @@ Pandora is a **smart, interactive document format** that merges **LaTeX mathemat
 
 It’s designed for **education**, **visual notes**, and **concept illustration** — perfect for math, physics, and engineering topics (e.g., CBSE/JEE materials).
 
-![eg](img.jpg)
+![eg](Screenshot_20251106_111730_Chrome.jpg)
 
 ---
 
